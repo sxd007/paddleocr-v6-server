@@ -193,32 +193,62 @@ CUDA_CHANNEL_MAP=(
 )
 
 # ╔══════════════════════════════════════════════════════════╗
-# ║  3. GPU 模式: nvidia-container-toolkit 检查               ║
+# ║  3. GPU 模式: nvidia 容器运行时检查                        ║
 # ╚══════════════════════════════════════════════════════════╝
 if [ "$MODE" = "gpu" ]; then
     echo ""
     echo -e "${BOLD}── 3. GPU 运行时检查 ──${NC}"
 
+    NCT_PKG=false
     NCT_OK=false
-    # 检查 nvidia-container-toolkit 是否安装
+
+    # 检查 nvidia-container-toolkit 包是否安装
     if command -v nvidia-ctk &>/dev/null; then
-        NCT_OK=true
+        NCT_PKG=true
     elif dpkg -l nvidia-container-toolkit &>/dev/null 2>&1; then
-        NCT_OK=true
+        NCT_PKG=true
     elif rpm -q nvidia-container-toolkit &>/dev/null 2>&1; then
-        NCT_OK=true
+        NCT_PKG=true
     fi
-    # 也检查 docker 运行时是否已注册 nvidia
-    if [ "$NCT_OK" = false ] && docker info 2>&1 | grep -q "Runtimes:.*nvidia"; then
+
+    # 真正验证：Docker 是否已注册 nvidia 运行时
+    if docker info 2>&1 | grep -q "Runtimes:.*nvidia"; then
         NCT_OK=true
     fi
 
     if [ "$NCT_OK" = true ]; then
-        ok "nvidia-container-toolkit 已就绪"
+        ok "nvidia 运行时已就绪"
+    elif [ "$NCT_PKG" = true ]; then
+        warn "nvidia-container-toolkit 已安装，但 Docker 尚未注册 nvidia 运行时"
+        warn "原因通常是安装后未重启 Docker"
+        echo ""
+        read -r -p "  是否尝试自动重启 Docker？ [y/N] " restart_docker
+        if [[ "$restart_docker" =~ ^[Yy]$ ]]; then
+            log "重启 Docker..."
+            sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
+            sleep 3
+            if docker info 2>&1 | grep -q "Runtimes:.*nvidia"; then
+                ok "Docker 已重启，nvidia 运行时已就绪"
+                NCT_OK=true
+            else
+                warn "重启后仍未生效，请手动检查: sudo systemctl restart docker"
+            fi
+        fi
+        if [ "$NCT_OK" = false ]; then
+            echo ""
+            warn "GPU 模式无法继续，是否切换为 CPU 模式？"
+            read -r -p "  切换到 CPU 模式？ [Y/n] " to_cpu
+            if [[ ! "$to_cpu" =~ ^[Nn]$ ]]; then
+                MODE="cpu"
+                ok "已切换为 CPU 模式"
+            else
+                err "请修复 Docker nvidia 运行时后重试，或使用 ./setup.sh --cpu"
+            fi
+        fi
     else
         warn "nvidia-container-toolkit 未安装，GPU 容器无法使用"
         echo ""
-        echo "  ${BOLD}自动安装（Ubuntu/Debian）:${NC}"
+        echo "  ${BOLD}Ubuntu/Debian 安装命令:${NC}"
         echo "    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \\"
         echo "      | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
         echo ""
@@ -231,13 +261,13 @@ if [ "$MODE" = "gpu" ]; then
         echo "    sudo apt-get install -y nvidia-container-toolkit"
         echo "    sudo systemctl restart docker"
         echo ""
-        echo "  安装后重新运行 ./setup.sh"
-        echo ""
-        read -r -p "  是否跳过此检查并继续（构建镜像，稍后手动处理）？ [y/N] " skip_nct
-        if [[ ! "$skip_nct" =~ ^[Yy]$ ]]; then
-            err "请安装 nvidia-container-toolkit 后重试"
+        read -r -p "  是否跳过 GPU 检查，切换为 CPU 模式继续？ [Y/n] " skip_nct
+        if [[ ! "$skip_nct" =~ ^[Nn]$ ]]; then
+            MODE="cpu"
+            ok "已切换为 CPU 模式"
+        else
+            err "请安装 nvidia-container-toolkit 后重试，或使用 ./setup.sh --cpu"
         fi
-        warn "跳过 nvidia-container-toolkit 检查，GPU 加速可能不可用"
     fi
 fi
 
@@ -492,12 +522,6 @@ if [ "$MODE" = "gpu" ]; then
     GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1 || true)
     echo -e "  ${BOLD}GPU${NC}         ${GPU_NAME:-N/A} · ${GPU_MEM:-N/A}"
     echo ""
-fi
-
-# ── 如果 GPU 模式但 nct 缺失，提醒 ──
-if [ "$MODE" = "gpu" ] && ! docker info 2>&1 | grep -q "Runtimes:.*nvidia" && ! command -v nvidia-ctk &>/dev/null; then
-    warn "⚠ nvidia-container-toolkit 未安装，GPU 加速可能不可用"
-    warn "   请安装后重启 Docker，然后重新运行 ./setup.sh"
 fi
 
 log "部署完成！"
