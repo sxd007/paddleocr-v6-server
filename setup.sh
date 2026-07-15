@@ -379,16 +379,20 @@ echo -e "${BOLD}── 6. 构建镜像 ──${NC}"
 BUILD_ARGS=()
 
 if [ "$MODE" = "gpu" ] && [ -n "${CUDA_VERSION:-}" ]; then
-    local base_image="${CUDA_IMAGE_MAP[$CUDA_VERSION]:-}"
-    local wheel_ch="${CUDA_CHANNEL_MAP[$CUDA_VERSION]:-cu126}"
+    base_image="${CUDA_IMAGE_MAP[$CUDA_VERSION]:-}"
+    wheel_ch="${CUDA_CHANNEL_MAP[$CUDA_VERSION]:-cu126}"
     if [ -n "$base_image" ]; then
         BUILD_ARGS+=(--build-arg "BASE_IMAGE=${base_image}")
         BUILD_ARGS+=(--build-arg "PADDLE_WHEEL_CHANNEL=${wheel_ch}")
         log "基础镜像: ${base_image}"
         log "Paddle 频道: ${wheel_ch}"
     else
-        warn "CUDA ${CUDA_VERSION} 无预设映射，使用默认值"
-        warn "支持的 CUDA 版本: 11.8 / 12.1 / 12.4 / 12.6"
+        # CUDA 版本超出映射表，用最接近的兼容版本
+        warn "CUDA ${CUDA_VERSION} 不在预设映射表中，尝试 cu126 兼容版本"
+        BUILD_ARGS+=(--build-arg "BASE_IMAGE=nvidia/cuda:12.6.3-runtime-ubuntu22.04")
+        BUILD_ARGS+=(--build-arg "PADDLE_WHEEL_CHANNEL=cu126")
+        log "基础镜像: nvidia/cuda:12.6.3-runtime-ubuntu22.04 (兼容回退)"
+        log "Paddle 频道: cu126 (兼容回退)"
     fi
 fi
 
