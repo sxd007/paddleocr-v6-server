@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    fastapi>=0.115.0 \
+    uvicorn[standard]>=0.32.0 \
+    python-multipart>=0.0.9
+
+COPY src/file_upload_server.py /app/src/file_upload_server.py
+
+ENV HOST=0.0.0.0 PORT=8091 UPLOAD_DIR=/app/uploads
+
+EXPOSE 8091
+
+CMD ["sh", "-c", "cd /app && python -m uvicorn src.file_upload_server:app --host $HOST --port $PORT"]

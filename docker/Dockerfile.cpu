@@ -1,0 +1,43 @@
+# =============================================================================
+# PaddleOCR v6 Server — CPU Dockerfile
+# =============================================================================
+# 无 GPU 需求，适用于任何 x86_64 / ARM64 环境。
+# 所有推理在 CPU 上完成，速度较慢但兼容性最广。
+#
+#   docker build -f docker/Dockerfile.cpu -t paddleocr-v6:cpu .
+#
+# setup.sh 自动选择此 Dockerfile。
+# =============================================================================
+
+FROM python:3.10-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
+
+# ── 系统依赖 ──
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
+    libgomp1 wget curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── PaddlePaddle CPU + OCR 生态 ──
+RUN pip install -U pip && \
+    pip install paddlepaddle==3.3.0 \
+        -i https://www.paddlepaddle.org.cn/packages/stable/cpu/ && \
+    pip install \
+        "paddleocr[all]" \
+        paddlex \
+        paddleocr-mcp \
+        fastapi uvicorn[standard] \
+        pillow numpy \
+        httpx \
+        PyMuPDF
+
+WORKDIR /app
+COPY src/ /app/src/
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+VOLUME ["/root/.paddlex", "/root/.paddleocr"]
+EXPOSE 8090
+
+CMD ["bash", "/app/start.sh"]

@@ -1,0 +1,63 @@
+# =============================================================================
+# PaddleOCR v6 Server — GPU Dockerfile
+# =============================================================================
+# 支持 CUDA 11.8 / 12.1 / 12.4 / 12.6，通过 build-arg 切换：
+#
+#   docker build -f docker/Dockerfile.gpu \
+#     --build-arg BASE_IMAGE=nvidia/cuda:12.6.3-runtime-ubuntu22.04 \
+#     --build-arg PADDLE_WHEEL_CHANNEL=cu126 \
+#     -t paddleocr-v6:latest .
+#
+# setup.sh 自动完成上述参数选择。
+# =============================================================================
+
+ARG BASE_IMAGE=nvidia/cuda:12.6.3-runtime-ubuntu22.04
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8
+
+# ── CUDA 驱动能力 ──
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# ── 系统依赖 ──
+RUN rm -f /etc/apt/sources.list.d/*.list && \
+    echo "deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse" > /etc/apt/sources.list && \
+    echo "deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb http://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    apt-get update -o Acquire::By-Hash::http=false -o Acquire::Retries=3 && \
+    apt-get install -y --no-install-recommends --fix-missing \
+    python3.10 python3-pip python3.10-venv \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
+    libgomp1 wget curl git \
+    && rm -rf /var/lib/apt/lists/* && \
+    ln -sf /usr/bin/python3.10 /usr/bin/python
+
+# ── PaddlePaddle GPU + OCR 生态 ──
+ARG PADDLE_WHEEL_CHANNEL=cu126
+RUN pip install -U pip && \
+    pip install paddlepaddle-gpu==3.3.0 \
+        -i https://www.paddlepaddle.org.cn/packages/stable/${PADDLE_WHEEL_CHANNEL}/ && \
+    pip install \
+        "paddleocr[all]" \
+        paddlex \
+        paddleocr-mcp \
+        fastapi uvicorn[standard] \
+        pillow numpy \
+        httpx \
+        PyMuPDF
+
+# ── HPI 高性能推理插件 ──
+RUN paddlex --install hpi-gpu 2>/dev/null || echo "HPI GPU: skipped"
+
+WORKDIR /app
+COPY src/ /app/src/
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+VOLUME ["/root/.paddlex", "/root/.paddleocr"]
+EXPOSE 8090
+
+CMD ["bash", "/app/start.sh"]

@@ -1,0 +1,31 @@
+# ── 部署相关：运行时生成，不提交 ──
+.env
+docker-compose.override.yml
+
+# ── 模型权重（首次启动自动下载 ~5-10 GB） ──
+models/
+
+# ── 上传文件 ──
+uploads/
+!uploads/.gitkeep
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+
+# ── 编辑器 / IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ── Claude Code 本地配置 ──
+.claude/

@@ -1,0 +1,74 @@
+# =============================================================================
+# PaddleOCR v6 Server — Docker Compose
+# =============================================================================
+# 用法：
+#   GPU 模式（默认）：    docker compose up -d
+#   CPU 模式：            PADDLE_DOCKERFILE=docker/Dockerfile.cpu docker compose up -d
+#   一键部署（推荐）：     ./setup.sh
+#
+# build args 通过 .env 或 shell 环境变量注入：
+#   PADDLE_DOCKERFILE     Dockerfile 路径（默认 docker/Dockerfile.gpu）
+#   BASE_IMAGE            基础镜像（GPU 默认 nvidia/cuda:12.6.3-runtime-ubuntu22.04）
+#   PADDLE_WHEEL_CHANNEL  paddle wheel 频道（GPU 默认 cu126，CPU 自动用 cpu）
+# =============================================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────
+  # 主服务：PaddleOCR v6 MCP Server（GPU / CPU 均可）
+  # ──────────────────────────────────────────────────────
+  paddleocr:
+    build:
+      context: .
+      dockerfile: ${PADDLE_DOCKERFILE:-docker/Dockerfile.gpu}
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-nvidia/cuda:12.6.3-runtime-ubuntu22.04}
+        PADDLE_WHEEL_CHANNEL: ${PADDLE_WHEEL_CHANNEL:-cu126}
+    container_name: paddleocr-v6
+    environment:
+      - PADDLE_OCR_DEVICE=${PADDLE_OCR_DEVICE:-gpu}
+      - ENABLE_HPI=${ENABLE_HPI:-true}
+      - USE_TENSORRT=${USE_TENSORRT:-true}
+      - TRT_PRECISION=${TRT_PRECISION:-fp16}
+      # 文件上传服务地址
+      - UPLOAD_EXTERNAL_URL=${PUBLIC_URL_BASE:-http://localhost:8091}
+      - UPLOAD_INTERNAL_URL=http://file-upload:8091
+    ports:
+      - "8090:8090"   # MCP Server
+    volumes:
+      - ./models:/root/.paddlex        # 权重缓存持久化
+      - ./src:/app/src                 # 源码热更新
+      - ./uploads:/app/uploads         # 共享上传目录
+      - ./start.sh:/app/start.sh       # 启动脚本
+    shm_size: 2g
+    restart: unless-stopped
+    networks:
+      - paddleocr-net
+
+  # ──────────────────────────────────────────────────────
+  # 文件上传服务（无 GPU，轻量独立）
+  # ──────────────────────────────────────────────────────
+  file-upload:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.upload
+    container_name: paddleocr-upload
+    environment:
+      - PUBLIC_URL_BASE=${PUBLIC_URL_BASE:-http://localhost:8091}
+      - UPLOAD_DIR=/app/uploads
+      - MAX_FILE_SIZE=52428800        # 50 MB
+      - FILE_RETENTION_MINUTES=5      # 上传后自动删除（分钟）
+      - HOST=0.0.0.0
+      - PORT=8091
+    ports:
+      - "8091:8091"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./src:/app/src
+    restart: unless-stopped
+    networks:
+      - paddleocr-net
+
+networks:
+  paddleocr-net:
+    driver: bridge
