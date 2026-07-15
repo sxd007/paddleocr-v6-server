@@ -222,8 +222,8 @@ if [ "$MODE" = "gpu" ]; then
         warn "nvidia-container-toolkit 已安装，但 Docker 尚未注册 nvidia 运行时"
         warn "原因通常是安装后未重启 Docker"
         echo ""
-        read -r -p "  是否尝试自动重启 Docker？ [y/N] " restart_docker
-        if [[ "$restart_docker" =~ ^[Yy]$ ]]; then
+        read -r -p "  是否自动重启 Docker？ [Y/n] " restart_docker
+        if [[ ! "$restart_docker" =~ ^[Nn]$ ]]; then
             log "重启 Docker..."
             sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
             sleep 3
@@ -231,42 +231,58 @@ if [ "$MODE" = "gpu" ]; then
                 ok "Docker 已重启，nvidia 运行时已就绪"
                 NCT_OK=true
             else
-                warn "重启后仍未生效，请手动检查: sudo systemctl restart docker"
+                err "重启 Docker 后 nvidia 运行时仍未生效，请手动检查后重试"
             fi
+        else
+            err "请手动执行 sudo systemctl restart docker 后重新运行 ./setup.sh"
         fi
-        if [ "$NCT_OK" = false ]; then
-            echo ""
-            warn "GPU 模式无法继续，是否切换为 CPU 模式？"
-            read -r -p "  切换到 CPU 模式？ [Y/n] " to_cpu
-            if [[ ! "$to_cpu" =~ ^[Nn]$ ]]; then
-                MODE="cpu"
-                ok "已切换为 CPU 模式"
-            else
-                err "请修复 Docker nvidia 运行时后重试，或使用 ./setup.sh --cpu"
-            fi
-        fi
+        # NCT_OK 如果仍为 false 走不到这里，上面已 err 退出
     else
         warn "nvidia-container-toolkit 未安装，GPU 容器无法使用"
         echo ""
-        echo "  ${BOLD}Ubuntu/Debian 安装命令:${NC}"
-        echo "    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \\"
-        echo "      | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
-        echo ""
-        echo "    distribution=\$(. /etc/os-release;echo \$ID\$VERSION_ID)"
-        echo "    curl -fsSL https://nvidia.github.io/libnvidia-container/\$distribution/libnvidia-container.list \\"
-        echo "      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \\"
-        echo "      | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list"
-        echo ""
-        echo "    sudo apt-get update -y"
-        echo "    sudo apt-get install -y nvidia-container-toolkit"
-        echo "    sudo systemctl restart docker"
-        echo ""
-        read -r -p "  是否跳过 GPU 检查，切换为 CPU 模式继续？ [Y/n] " skip_nct
-        if [[ ! "$skip_nct" =~ ^[Nn]$ ]]; then
-            MODE="cpu"
-            ok "已切换为 CPU 模式"
+        # apt 系系统 → 一键安装
+        if command -v apt-get &>/dev/null; then
+            read -r -p "  是否自动安装 nvidia-container-toolkit 并重启 Docker？ [Y/n] " do_install
+            if [[ ! "$do_install" =~ ^[Nn]$ ]]; then
+                log "添加 NVIDIA 容器仓库..."
+                curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+                    | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null || true
+                distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+                curl -fsSL https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list \
+                    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+                    | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null || true
+                log "安装 nvidia-container-toolkit..."
+                sudo apt-get update -y -qq && sudo apt-get install -y -qq nvidia-container-toolkit
+                log "重启 Docker..."
+                sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
+                sleep 3
+                if docker info 2>&1 | grep -q "Runtimes:.*nvidia"; then
+                    ok "安装完成，nvidia 运行时已就绪"
+                    NCT_OK=true
+                else
+                    err "安装完成但 nvidia 运行时未生效，请手动执行 sudo systemctl restart docker 后重试"
+                fi
+            else
+                err "请手动安装 nvidia-container-toolkit 后重新运行 ./setup.sh"
+            fi
         else
-            err "请安装 nvidia-container-toolkit 后重试，或使用 ./setup.sh --cpu"
+            echo "  ${BOLD}请根据你的发行版安装 nvidia-container-toolkit:${NC}"
+            echo ""
+            echo "  Ubuntu/Debian:"
+            echo "    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \\"
+            echo "      | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
+            echo "    distribution=\$(. /etc/os-release;echo \$ID\$VERSION_ID)"
+            echo "    curl -fsSL https://nvidia.github.io/libnvidia-container/\$distribution/libnvidia-container.list \\"
+            echo "      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \\"
+            echo "      | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list"
+            echo "    sudo apt-get update -y && sudo apt-get install -y nvidia-container-toolkit"
+            echo "    sudo systemctl restart docker"
+            echo ""
+            echo "  CentOS/RHEL:"
+            echo "    sudo yum install -y nvidia-container-toolkit"
+            echo "    sudo systemctl restart docker"
+            echo ""
+            err "安装完成后重新运行 ./setup.sh"
         fi
     fi
 fi
